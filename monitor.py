@@ -150,7 +150,7 @@ def scan_html(spec: dict, body: str) -> list[dict]:
                 price = float(offer['price'])
             except (KeyError, TypeError, ValueError):
                 continue
-            entry = deal(spec, title + ' ' + sku, price, True)
+            entry = deal(spec, spec['seller'] + ' ' + title + ' ' + sku, price, True)
             if entry:
                 # Shipping not confirmed at checkout for these retailers: log for review, never auto-alert.
                 ret.append(entry)
@@ -216,16 +216,21 @@ def report_issue(entry: dict) -> str:
     issues = api_request(base + '/issues?' + urlencode({'state': 'all', 'per_page': '100'}))
     for issue in issues:
         if f'<!-- handheld-deal:{marker} -->' in (issue.get('body') or ''):
-            m = re.search(r'<!-- initial-cents:(\d+) -->', issue.get('body') or '')
+            m = re.search(r'<!-- last-cents:(\d+) -->', issue.get('body') or '') or re.search(r'<!-- initial-cents:(\d+) -->', issue.get('body') or '')
             old = int(m.group(1)) if m else 10**10
             if round(entry['before_tax'] * 100) >= old - 2500:
                 return 'already alerted at this or similar price'
+            body_now = issue.get('body') or ''
+            marker_now = f"<!-- last-cents:{round(entry['before_tax'] * 100)} -->"
+            if '<!-- last-cents:' in body_now:
+                body_now = re.sub(r'<!-- last-cents:\d+ -->', marker_now, body_now, count=1)
+            else:
+                body_now += '\n' + marker_now
+            api_request(base + f"/issues/{issue['number']}", 'PATCH', {'body': body_now, 'state': 'open'})
             api_request(base + f"/issues/{issue['number']}/comments", 'POST', {'body': f"Better price now ${entry['before_tax']:.2f} before tax: {entry['url']}"})
-            if issue.get('state') == 'closed':
-                api_request(base + f"/issues/{issue['number']}", 'PATCH', {'state': 'open'})
             send_ntfy(entry)
             return f"commented on issue #{issue['number']} (price improved)"
-    body = (f"<!-- handheld-deal:{marker} -->\n<!-- initial-cents:{round(entry['before_tax'] * 100)} -->\n"
+    body = (f"<!-- handheld-deal:{marker} -->\n<!-- initial-cents:{round(entry['before_tax'] * 100)} -->\n<!-- last-cents:{round(entry['before_tax'] * 100)} -->\n"
             f"## {entry['label']} — exceptional listing\n\n**Merchant:** {entry['seller']}  \n"
             f"**Condition:** {entry['condition']}  \n**Exact listing:** {entry['url']}  \n"
             f"**Listed:** ${entry['price']:.2f}  \n**US shipping estimate:** ${entry['shipping']:.2f}  \n"
