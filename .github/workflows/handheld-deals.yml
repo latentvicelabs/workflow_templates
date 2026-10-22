@@ -1,0 +1,39 @@
+name: OLED handheld deal watch
+on:
+  schedule:
+    # GitHub's 5-min minimum is not a latency guarantee. Offset to avoid :00 stampede.
+    - cron: '3,13,23,33,43,53 * * * *'
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'monitor.py'
+      - '.github/workflows/handheld-deals.yml'
+permissions:
+  contents: read
+  issues: write
+concurrency:
+  group: handheld-deal-watch
+  cancel-in-progress: false
+jobs:
+  scan:
+    if: github.repository_owner == 'latentvicelabs'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check merchants and discovery feeds
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: python monitor.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: handheld-watch-${{ github.run_number }}
+          path: report.json
+          if-no-files-found: ignore
+          retention-days: 5
